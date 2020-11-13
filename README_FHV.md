@@ -9,7 +9,7 @@ pip install -r requirements.txt
 git submodule update --init --recursive
 ```
 
-create / copy customization folder with a `config.json` file!
+create / copy customization folder with a `/etc/privacyide/pi.cfg` file - see README.rst for details!
 
 ```shell
 ./pi-manage createdb
@@ -24,3 +24,12 @@ create / copy customization folder with a `config.json` file!
 when updating the code from upstream, run this command to update all submodules:
 
 `git pull --recurse-submodules`
+
+to update privacy idea:
+
+```shell
+source venv/bin/activate
+pip install -r requirements.txt
+./pi-manage db upgrade
+./pi-manage runserver
+```
