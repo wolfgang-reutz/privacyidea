@@ -5,6 +5,7 @@ import json
 import os
 import datetime
 import codecs
+from mock import mock
 from privacyidea.lib.policy import (set_policy, delete_policy, SCOPE, ACTION,
                                     enable_policy,
                                     PolicyClass)
@@ -259,6 +260,39 @@ class APITokenTestCase(MyApiTestCase):
             detail = res.json.get("detail")
             tokenlist = result.get("value").get("tokens")
             self.assertTrue(len(tokenlist) == 1, len(tokenlist))
+
+        # get tokens with a specific tokeninfo
+        with self.app.test_request_context('/token/',
+                                           method='GET',
+                                           query_string=urlencode({
+                                               "assigned": False,
+                                           "infokey": "tokenkind",
+                                           "infovalue": "hardware"}),
+                                           headers={'Authorization': self.at}):
+            res = self.app.full_dispatch_request()
+            self.assertEqual(res.status_code, 200)
+            result = res.json.get("result")
+            detail = res.json.get("detail")
+            tokenlist = result.get("value").get("tokens")
+            self.assertEqual(len(tokenlist), 0)
+
+        init_token({"serial": "hw001", "genkey": 1}, tokenkind="hardware")
+        # get tokens with a specific tokeninfo
+        with self.app.test_request_context('/token/',
+                                           method='GET',
+                                           query_string=urlencode({
+                                               "assigned": False,
+                                               "infokey": "tokenkind",
+                                               "infovalue": "hardware"}),
+                                           headers={'Authorization': self.at}):
+            res = self.app.full_dispatch_request()
+            self.assertEqual(res.status_code, 200)
+            result = res.json.get("result")
+            detail = res.json.get("detail")
+            tokenlist = result.get("value").get("tokens")
+            self.assertEqual(len(tokenlist), 1)
+
+        remove_token("hw001")
 
     def test_02_list_tokens_csv(self):
         with self.app.test_request_context('/token/',
@@ -610,9 +644,9 @@ class APITokenTestCase(MyApiTestCase):
                                                  'success': '0'},
                                            headers={'Authorization': self.at}):
             res = self.app.full_dispatch_request()
-            self.assertEquals(res.status_code, 200, res)
-            self.assertEquals(len(res.json['result']['value']['auditdata']), 1, res.json)
-            self.assertEquals(res.json['result']['value']['auditdata'][0]['success'], 0, res.json)
+            self.assertEqual(res.status_code, 200, res)
+            self.assertEqual(len(res.json['result']['value']['auditdata']), 1, res.json)
+            self.assertEqual(res.json['result']['value']['auditdata'][0]['success'], 0, res.json)
 
         # Successful resync with consecutive values
         with self.app.test_request_context('/token/resync',
@@ -634,9 +668,9 @@ class APITokenTestCase(MyApiTestCase):
                                                  'success': '1'},
                                            headers={'Authorization': self.at}):
             res = self.app.full_dispatch_request()
-            self.assertEquals(res.status_code, 200, res)
-            self.assertEquals(len(res.json['result']['value']['auditdata']), 1, res.json)
-            self.assertEquals(res.json['result']['value']['auditdata'][0]['success'], 1, res.json)
+            self.assertEqual(res.status_code, 200, res)
+            self.assertEqual(len(res.json['result']['value']['auditdata']), 1, res.json)
+            self.assertEqual(res.json['result']['value']['auditdata'][0]['success'], 1, res.json)
 
         # Get the OTP token and inspect the counter
         with self.app.test_request_context('/token/',
@@ -807,6 +841,19 @@ class APITokenTestCase(MyApiTestCase):
             self.assertEqual(tokeninfo.get("validity_period_end"),
                              "2014-05-22T23:00+0200")
 
+        # check for broken validity dates
+        with self.app.test_request_context('/token/set/SET001',
+                                           method="POST",
+                                           data={"validity_period_start": "unknown"},
+                                           headers={'Authorization': self.at}):
+            res = self.app.full_dispatch_request()
+            self.assertEqual(res.status_code, 400, res)
+            result = res.json.get("result")
+            self.assertEqual(result['error']['code'], 301, result)
+            self.assertEqual(result['error']['message'],
+                             "ERR301: Could not parse validity period start date!",
+                             result)
+
     def test_10_set_token_realms(self):
         self._create_temp_token("REALM001")
 
@@ -832,10 +879,13 @@ class APITokenTestCase(MyApiTestCase):
             self.assertTrue(token.get("realms") == ["realm1"], token)
 
     def test_11_load_tokens(self):
+        # Set dummy policy to verify faulty behaviour with #2209
+        set_policy("dumm01", scope=SCOPE.USER, action=ACTION.DISABLE)
         # Load OATH CSV
         with self.app.test_request_context('/token/load/import.oath',
                                             method="POST",
                                             data={"type": "oathcsv",
+                                                  "tokenrealms": self.realm1,
                                                   "file": (IMPORTFILE,
                                                            "import.oath")},
                                             headers={'Authorization': self.at}):
@@ -847,6 +897,7 @@ class APITokenTestCase(MyApiTestCase):
         # check for a successful audit entry
         entry = self.find_most_recent_audit_entry(action='*/token/load/*')
         self.assertEqual(entry['success'], 1, entry)
+        delete_policy("dumm01")
 
         # Load GPG encrypted OATH CSV
         with self.app.test_request_context('/token/load/import.oath.asc',
@@ -1054,8 +1105,7 @@ class APITokenTestCase(MyApiTestCase):
         # check the user
         self.assertEqual(token.token.first_owner.user_id, "1000")
         # check if the TO001 has a pin
-        self.assertTrue(len(token.token.pin_hash) == 64,
-                        len(token.token.pin_hash))
+        self.assertTrue(token.token.pin_hash.startswith("$argon2"))
 
     def test_13_lost_token(self):
         self._create_temp_token("LOST001")
@@ -1458,20 +1508,22 @@ class APITokenTestCase(MyApiTestCase):
         set_policy("firstuse", scope=SCOPE.ENROLL,
                    action=ACTION.CHANGE_PIN_FIRST_USE)
 
-        with self.app.test_request_context('/token/init',
-                                           method='POST',
-                                           data={"genkey": 1,
-                                                 "pin": "123456"},
-                                           headers={'Authorization': self.at}):
-            res = self.app.full_dispatch_request()
-            self.assertTrue(res.status_code == 200, res)
-            detail = res.json.get("detail")
+        current_time = datetime.datetime.now(tzlocal())
+        with mock.patch('privacyidea.lib.tokenclass.datetime') as mock_dt:
+            mock_dt.now.return_value = current_time
+            with self.app.test_request_context('/token/init',
+                                               method='POST',
+                                               data={"genkey": 1,
+                                                     "pin": "123456"},
+                                               headers={'Authorization': self.at}):
+                res = self.app.full_dispatch_request()
+                self.assertTrue(res.status_code == 200, res)
+                detail = res.json.get("detail")
 
-            serial = detail.get("serial")
-            token = get_tokens(serial=serial)[0]
-            ti = token.get_tokeninfo("next_pin_change")
-            ndate = datetime.datetime.now(tzlocal()).strftime(DATE_FORMAT)
-            self.assertEqual(ti, ndate)
+                serial = detail.get("serial")
+                token = get_tokens(serial=serial)[0]
+                ti = token.get_tokeninfo("next_pin_change")
+                self.assertEqual(ti, current_time.strftime(DATE_FORMAT))
 
         # If the administrator sets a PIN of the user, the next_pin_change
         # must also be created!
@@ -1481,21 +1533,21 @@ class APITokenTestCase(MyApiTestCase):
         ti = token.get_tokeninfo("next_pin_change")
         self.assertEqual(ti, None)
         # Now we set the PIN
-        with self.app.test_request_context('/token/setpin/SP001',
-                                           method='POST',
-                                           data={"otppin": "1234"},
-                                           headers={'Authorization': self.at}):
+        current_time = datetime.datetime.now(tzlocal())
+        with mock.patch('privacyidea.lib.tokenclass.datetime') as mock_dt:
+            mock_dt.now.return_value = current_time
+            with self.app.test_request_context('/token/setpin/SP001',
+                                               method='POST',
+                                               data={"otppin": "1234"},
+                                               headers={'Authorization': self.at}):
 
-            res = self.app.full_dispatch_request()
-            self.assertTrue(res.status_code == 200, res)
-            result = res.json.get("result")
-            detail = res.json.get("detail")
+                res = self.app.full_dispatch_request()
+                self.assertTrue(res.status_code == 200, res)
 
-            serial = "SP001"
-            token = get_tokens(serial=serial)[0]
-            ti = token.get_tokeninfo("next_pin_change")
-            ndate = datetime.datetime.now(tzlocal()).strftime(DATE_FORMAT)
-            self.assertEqual(ti, ndate)
+                serial = "SP001"
+                token = get_tokens(serial=serial)[0]
+                ti = token.get_tokeninfo("next_pin_change")
+                self.assertEqual(ti, current_time.strftime(DATE_FORMAT))
 
         delete_policy("firstuse")
 
@@ -1532,7 +1584,11 @@ class APITokenTestCase(MyApiTestCase):
             self.assertTrue(value.get("count") == 1, result)
 
             tokeninfo = token.get("info")
-            self.assertDictContainsSubset({'key1': 'value 1', 'key2': 'value 2'}, tokeninfo)
+            test_dict = {'key1': 'value 1', 'key2': 'value 2'}
+            try:
+                self.assertTrue(test_dict.viewitems() <= tokeninfo.viewitems())
+            except AttributeError:
+                self.assertTrue(test_dict.items() <= tokeninfo.items())
 
         # Overwrite an existing tokeninfo value
         with self.app.test_request_context('/token/info/INF001/key1',
@@ -1557,7 +1613,11 @@ class APITokenTestCase(MyApiTestCase):
             self.assertTrue(value.get("count") == 1, result)
 
             tokeninfo = token.get("info")
-            self.assertDictContainsSubset({'key1': 'value 1 new', 'key2': 'value 2'}, tokeninfo)
+            test_dict = {'key1': 'value 1 new', 'key2': 'value 2'}
+            try:
+                self.assertTrue(test_dict.viewitems() <= tokeninfo.viewitems())
+            except AttributeError:
+                self.assertTrue(test_dict.items() <= tokeninfo.items())
 
         # Delete an existing tokeninfo value
         with self.app.test_request_context('/token/info/INF001/key1',
@@ -1600,7 +1660,10 @@ class APITokenTestCase(MyApiTestCase):
             self.assertTrue(value.get("count") == 1, result)
 
             tokeninfo = token.get("info")
-            self.assertDictContainsSubset({'key2': 'value 2'}, tokeninfo)
+            try:
+                self.assertTrue({'key2': 'value 2'}.viewitems() <= tokeninfo.viewitems())
+            except AttributeError:
+                self.assertTrue({'key2': 'value 2'}.items() <= tokeninfo.items())
             self.assertNotIn('key1', tokeninfo)
 
     def test_25_user_init_defaults(self):

@@ -135,9 +135,11 @@ myApp.controller("tokenController", function (TokenFactory, ConfigFactory,
 });
 
 
-myApp.controller("tokenAssignController", function ($scope, TokenFactory,
-                                                    $stateParams, AuthFactory,
-                                                    UserFactory, $state) {
+myApp.controller("tokenAssignController", ['$scope', 'TokenFactory',
+                                           '$stateParams', 'AuthFactory',
+                                           'UserFactory', '$state',
+    function tokenAssignController($scope, TokenFactory, $stateParams,
+                                   AuthFactory, UserFactory, $state) {
     $scope.assignToken = function () {
         TokenFactory.assign({
             serial: fixSerial($scope.newToken.serial),
@@ -146,16 +148,21 @@ myApp.controller("tokenAssignController", function ($scope, TokenFactory,
             $state.go('token.list');
         });
     };
-});
+}]);
 
-myApp.controller("tokenEnrollController", function ($scope, TokenFactory,
-                                                    $timeout,
-                                                    $stateParams, AuthFactory,
-                                                    UserFactory, $state,
-                                                    ConfigFactory, instanceUrl,
-                                                    $http, hotkeys,
-                                                    gettextCatalog,
-                                                    inform, U2fFactory, webAuthnToken) {
+myApp.controller("tokenEnrollController", ["$scope", "TokenFactory", "$timeout",
+                                           "$stateParams", "AuthFactory",
+                                           "UserFactory", "$state",
+                                           "ConfigFactory", "instanceUrl",
+                                           "$http", "hotkeys", "gettextCatalog",
+                                           "inform", "U2fFactory",
+                                           "webAuthnToken",
+                                           "versioningSuffixProvider",
+    function tokenEnrollController($scope, TokenFactory, $timeout, $stateParams,
+                                   AuthFactory, UserFactory, $state,
+                                   ConfigFactory, instanceUrl, $http, hotkeys,
+                                   gettextCatalog, inform, U2fFactory,
+                                   webAuthnToken, versioningSuffixProvider) {
 
     hotkeys.bindTo($scope).add({
         combo: 'alt+e',
@@ -177,9 +184,8 @@ myApp.controller("tokenEnrollController", function ($scope, TokenFactory,
     $scope.qrCodeWidth = 250;
 
     if ($state.includes('token.wizard') && !$scope.show_seed) {
-        $scope.qrCodeWidth = 500;
+        $scope.qrCodeWidth = 300;
     }
-
     $scope.checkRight = AuthFactory.checkRight;
     $scope.loggedInUser = AuthFactory.getUser();
     $scope.newUser = {};
@@ -193,6 +199,7 @@ myApp.controller("tokenEnrollController", function ($scope, TokenFactory,
     // questions for questionnaire token
     $scope.questions = [];
     $scope.num_questions = 5;
+    $scope.fileVersionSuffix = versioningSuffixProvider.$get();
     // These are values that are also sent to the backend!
     $scope.form = {
         timeStep: 30,
@@ -286,6 +293,19 @@ myApp.controller("tokenEnrollController", function ($scope, TokenFactory,
             $scope.form.genkey = false;
         } else {
             $scope.form.genkey = true;
+        }
+        if ($scope.form.type === "yubikey") {
+            // save the original otp length
+            $scope.old_otplen = $scope.form.otplen;
+            // set the default otp length for yubikeys in AES mode to 44
+            // (12 characters (6 bytes) UID and 32 characters (16 bytes) OTP)
+            $scope.form.otplen = 44;
+        } else {
+            // restore old otp length if available
+            if (typeof $scope.old_otplen != "undefined") {
+                $scope.form.otplen = $scope.old_otplen;
+                delete $scope.old_otplen;
+            }
         }
 
         $scope.preset_indexedsecret();
@@ -413,6 +433,8 @@ myApp.controller("tokenEnrollController", function ($scope, TokenFactory,
                 $scope.form.type = tkey;
                 // Set the 2step enrollment value
                 $scope.setTwostepEnrollmentDefault();
+                // Initialize token specific settings
+                $scope.changeTokenType();
                 break;
             }
         }
@@ -515,12 +537,9 @@ myApp.controller("tokenEnrollController", function ($scope, TokenFactory,
     };
 
     $scope.yubikeyGetLen = function () {
-        if ($scope.tempData.yubikeyTest.length >= 32) {
-            $scope.form.otplen = $scope.tempData.yubikeyTest.length;
-            if ($scope.tempData.yubikeyTest.length > 32) {
-                $scope.tempData.yubikeyUid = true;
-                $scope.tempData.yubikeyUidLen = $scope.tempData.yubikeyTest.length - 32;
-            }
+        let yktestdatalen = $scope.tempData.yubikeyTest.trim().length;
+        if (yktestdatalen >= 32) {
+            $scope.form.otplen = yktestdatalen;
         }
     };
 
@@ -640,7 +659,7 @@ myApp.controller("tokenEnrollController", function ($scope, TokenFactory,
         startingDay: 1
     };
 
-});
+}]);
 
 
 myApp.controller("tokenImportController", function ($scope, Upload,

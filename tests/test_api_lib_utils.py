@@ -6,11 +6,13 @@ from .base import MyApiTestCase
 
 from privacyidea.api.lib.utils import (getParam,
                                        check_policy_name,
-                                       verify_auth_token, is_fqdn, attestation_certificate_allowed)
+                                       verify_auth_token, is_fqdn, attestation_certificate_allowed,
+                                       get_priority_from_param)
 from privacyidea.lib.error import ParameterError
 import jwt
 import mock
 import datetime
+import warnings
 from privacyidea.lib.error import AuthError
 
 
@@ -74,8 +76,12 @@ class UtilsTestCase(MyApiTestCase):
                                          "resolver": "resolverX"},
                                 key=key,
                                 algorithm="RS256")
-        self.assertRaisesRegexp(AuthError, "The username hanswurst is not allowed to impersonate via JWT.",
-                                verify_auth_token, auth_token=auth_token, required_role="user")
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', category=DeprecationWarning)
+            self.assertRaisesRegexp(
+                AuthError,
+                "The username hanswurst is not allowed to impersonate via JWT.",
+                verify_auth_token, auth_token=auth_token, required_role="user")
 
         # A user ending with hans is not allowed
         # A user starting with hans and ending with "t" is not allowed
@@ -85,8 +91,12 @@ class UtilsTestCase(MyApiTestCase):
                                          "resolver": "resolverX"},
                                 key=key,
                                 algorithm="RS256")
-        self.assertRaisesRegexp(AuthError, "The username kleinerhans is not allowed to impersonate via JWT.",
-                                verify_auth_token, auth_token=auth_token, required_role="user")
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', category=DeprecationWarning)
+            self.assertRaisesRegexp(
+                AuthError,
+                "The username kleinerhans is not allowed to impersonate via JWT.",
+                verify_auth_token, auth_token=auth_token, required_role="user")
 
         # Successful authentication with dedicated user
         with mock.patch("logging.Logger.warning") as mock_log:
@@ -193,3 +203,10 @@ class UtilsTestCase(MyApiTestCase):
                 }
             )
         )
+
+    def test_07_get_priority_from_param(self):
+        # check if only keys with given integer values are returned
+        param = {'priority.resolver1': 1, 'priority.resolver2': None,
+                 'resolvers': 'resolver1,resolver2,resolver3'}
+        priority = get_priority_from_param(param)
+        self.assertEqual(priority, {'resolver1': 1})

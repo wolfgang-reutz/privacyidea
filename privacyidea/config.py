@@ -1,5 +1,8 @@
 import os
 import logging
+import random
+import string
+log = logging.getLogger(__name__)
 basedir = os.path.abspath(os.path.dirname(__file__))
 basedir = "/".join(basedir.split("/")[:-1]) + "/"
 
@@ -24,6 +27,15 @@ HUb6rdpz/AsBSMV3+kZiDqv/NA5dgR8dXAK2or8JSK/ghw8c3qgt+yLW+1g9FDao
 WQIDAQAB
 -----END PUBLIC KEY-----
 """
+
+
+def _random_password(size):
+    log.info("SECRET_KEY not set in config. Generating a random key.")
+    passwd = [random.choice(string.ascii_lowercase + \
+                            string.ascii_uppercase + string.digits) for _x in range(size)]
+    # return shuffled password
+    random.shuffle(passwd)
+    return "".join(passwd)
 
 
 class Config(object):
@@ -53,6 +65,7 @@ class DevelopmentConfig(Config):
     SQLALCHEMY_DATABASE_URI = os.environ.get('DEV_DATABASE_URL') or \
         'sqlite:///' + os.path.join(basedir, 'data-dev.sqlite')
     PI_LOGLEVEL = logging.DEBUG
+    PI_TRANSLATION_WARNING = "[Missing]"
 
 
 class TestingConfig(Config):
@@ -72,7 +85,7 @@ class TestingConfig(Config):
     PI_SCRIPT_HANDLER_DIRECTORY = "tests/testdata/scripts/"
     PI_NOTIFICATION_HANDLER_SPOOLDIRECTORY = "tests/testdata/"
     PI_NODE = "Node1"
-    PI_NODES = ["Node2"]
+    PI_NODES = ["Node1", "Node2"]
     PI_ENGINE_REGISTRY_CLASS = "null"
     PI_TRUSTED_JWT = [{"public_key": pubtest_key,
                        "algorithm": "HS256",
@@ -105,7 +118,7 @@ class ProductionConfig(Config):
         'sqlite:///' + os.path.join(basedir, 'data.sqlite')
     #SQLALCHEMY_DATABASE_URI = "mysql://pi2:pi2@localhost/pi2"
     # This is used to encrypt the auth_token
-    SECRET_KEY = os.environ.get('SECRET_KEY') or 't0p s3cr3t'
+    SECRET_KEY = os.environ.get('SECRET_KEY') or _random_password(24)
     # This is used to encrypt the admin passwords
     PI_PEPPER = "Never know..."
     # This is used to encrypt the token data and token passwords

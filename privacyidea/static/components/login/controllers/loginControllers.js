@@ -44,6 +44,7 @@ angular.module("privacyideaApp")
     $scope.checkMainMenu = AuthFactory.checkMainMenu;
     $scope.checkEnroll = AuthFactory.checkEnroll;
     $scope.inputNamePatterns = resourceNamePatterns;
+    $scope.startRoute = "/token";
     var obj = angular.element(document.querySelector("#REMOTE_USER"));
     $scope.remoteUser = obj.val();
     if (!$scope.remoteUser) {
@@ -65,7 +66,13 @@ angular.module("privacyideaApp")
     obj = angular.element(document.querySelector('#HAS_JOB_QUEUE'));
     $scope.hasJobQueue = obj.val() == "True";
     obj = angular.element(document.querySelector('#LOGIN_TEXT'));
-    $scope.piLoginText= obj.val();
+    $scope.piLoginText = obj.val();
+    obj = angular.element(document.querySelector('#PI_TRANSLATION_WARNING'));
+    $scope.piTranslationWarning = obj.val() !== "False";
+    $scope.piTranslationPrefix = obj.val();
+    gettextCatalog.debug = $scope.piTranslationWarning;
+    gettextCatalog.debugPrefix = $scope.piTranslationPrefix;
+
     // Check if registration is allowed
     $scope.registrationAllowed = false;
     RegisterFactory.status(function (data) {
@@ -374,18 +381,39 @@ angular.module("privacyideaApp")
             if ($scope.dialogNoToken) {
                 $('#dialogNoToken').modal("show");
             }
-            $scope.qr_image_android = data.result.value.qr_image_android || "";
-            $scope.qr_image_ios = data.result.value.qr_image_ios || "";
-            $scope.qr_image_custom = data.result.value.qr_image_custom || "";
-            // This is a helper variable to get the number of qr images to display
-            $scope.qr_image_count = Number($scope.qr_image_android.length > 0)
-                + Number($scope.qr_image_ios.length > 0)
-                + Number($scope.qr_image_custom.length > 0);
+            $scope.qr_images = [];
+            if ( data.result.value.qr_image_android ) {
+                $scope.qr_images.push({
+                    'src': data.result.value.qr_image_android,
+                    'alt': 'QR-Code with link to android app in play store',
+                    'help': gettextCatalog.getString('Get the Authenticator App for Android.')})
+            }
+            if ( data.result.value.qr_image_ios ) {
+                $scope.qr_images.push({
+                    'src': data.result.value.qr_image_ios,
+                    'alt': 'QR-Code with link to iOS app in app store',
+                    'help': gettextCatalog.getString('Get the Authenticator App for iOS.')})
+            }
+            if ( data.result.value.qr_image_custom ) {
+                $scope.qr_images.push({
+                    'src': data.result.value.qr_image_custom,
+                    'alt': 'QR-Code with link to a custom app',
+                    'help': gettextCatalog.getString('Get the Authenticator App.')})
+            }
+            if ($scope.qr_images.length > 0) {
+                $scope.qr_col_md = "col-md-" + parseInt(12 / $scope.qr_images.length);
+            }
             $scope.token_page_size = data.result.value.token_page_size;
             $scope.user_page_size = data.result.value.user_page_size;
             $scope.user_details_in_tokenlist = data.result.value.user_details;
             $scope.default_tokentype = data.result.value.default_tokentype;
             $scope.timeout_action = data.result.value.timeout_action;
+            $scope.admin_dashboard = data.result.value.admin_dashboard;
+            if ($scope.admin_dashboard) {
+                $scope.startRoute = "/dashboard";
+            } else {
+                $scope.startRoute = "/token";
+            }
             $scope.hide_welcome = data.result.value.hide_welcome;
             $scope.hide_buttons = data.result.value.hide_buttons;
             $scope.show_seed = data.result.value.show_seed;
@@ -410,8 +438,8 @@ angular.module("privacyideaApp")
             if ( $scope.unlocking ) {
                 $('#dialogLock').modal('hide');
             } else {
-                // if we are unlocking we do NOT go to the tokens
-                $location.path("/token");
+                // if we login anew, we either go to the token or to the dashboard
+                $location.path($scope.startRoute);
             }
 
             //inform.add(gettextCatalog.getString("privacyIDEA UI supports " +

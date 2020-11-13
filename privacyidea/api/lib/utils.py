@@ -267,7 +267,7 @@ def get_priority_from_param(param):
     """
     priority = {}
     for k, v in param.items():
-        if k.startswith("priority."):
+        if k.startswith("priority.") and isinstance(v, int):
             priority[k[len("priority."):]] = int(v)
     return priority
 
@@ -300,7 +300,7 @@ def verify_auth_token(auth_token, required_role=None):
                 if trusted_jwt.get("algorithm") in TRUSTED_JWT_ALGOS:
                     j = jwt.decode(auth_token,
                                    trusted_jwt.get("public_key"),
-                                   algorithms=TRUSTED_JWT_ALGOS)
+                                   algorithms=[trusted_jwt.get("algorithm")])
                     if dict((k, j.get(k)) for k in ("role", "resolver", "realm")) == \
                             dict((k, trusted_jwt.get(k)) for k in ("role", "resolver", "realm")):
                         if re.match(trusted_jwt.get("username") + "$", j.get("username")):
@@ -352,7 +352,7 @@ def check_policy_name(name):
         if re.search(disallowed_pattern[0], name, flags=disallowed_pattern[1]):
             raise ParameterError(_(u"'{0!s}' is an invalid policy name.").format(name))
 
-    if not re.match('^[a-zA-Z0-9_.\- ]*$', name):
+    if not re.match(r'^[a-zA-Z0-9_.\- ]*$', name):
         raise ParameterError(_("The name of the policy may only contain "
                                "the characters a-zA-Z0-9_. -"))
 

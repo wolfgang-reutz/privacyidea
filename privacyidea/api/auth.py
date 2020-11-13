@@ -74,6 +74,7 @@ from privacyidea.lib.config import get_from_config, SYSCONF, ensure_no_config_ob
 from privacyidea.lib.event import event, EventConfiguration
 from privacyidea.lib import _
 import logging
+import traceback
 
 log = logging.getLogger(__name__)
 
@@ -103,6 +104,21 @@ def before_request():
                         "action": "{0!s} {1!s}".format(request.method, request.url_rule),
                         "action_detail": "",
                         "info": ""})
+
+    username = getParam(request.all_data, "username")
+    if username:
+        # We only fill request.User, if we really have a username.
+        # On endpoints like /auth/rights, this is not available
+        loginname, realm = split_user(username)
+        # overwrite the split realm if we have a realm parameter. Default back to default_realm
+        realm = getParam(request.all_data, "realm", default=realm) or realm or get_default_realm()
+        # Prefill the request.User. This is used by some pre-event handlers
+        try:
+            request.User = User(loginname, realm)
+        except Exception as e:
+            request.User = None
+            log.warning(u"Problem resolving user {0!s} in realm {1!s}: {2!s}.".format(loginname, realm, e))
+            log.debug(u"{0!s}".format(traceback.format_exc()))
 
 
 @jwtauth.route('', methods=['POST'])
@@ -207,12 +223,9 @@ def get_auth_token():
         raise AuthError(_("Authentication failure. Missing Username"),
                         id=ERROR.AUTHENTICATE_MISSING_USERNAME)
 
-    loginname = username
-    split_at_sign = get_from_config(SYSCONF.SPLITATSIGN, return_bool=True)
-    if split_at_sign:
-        (loginname, realm) = split_user(username)
+    loginname, realm = split_user(username)
 
-    # overwrite the splitted realm if we have a realm parameter
+    # overwrite the split realm if we have a realm parameter
     if realm_param:
         realm = realm_param
 
@@ -270,6 +283,7 @@ def get_auth_token():
     elif verify_db_admin(username, password):
         role = ROLE.ADMIN
         admin_auth = True
+        log.info("Local admin '{0!s}' successfully logged in.".format(username))
         # This admin is not in the default realm!
         realm = ""
         g.audit_object.log({"success": True,
@@ -292,6 +306,11 @@ def get_auth_token():
                                                     superuser_realms=
                                                     superuser_realms)
         details = details or {}
+        if db_admin_exist(loginname) and realm == get_default_realm():
+            # If there is a local admin with the same login name as the user
+            # in the default realm, we inform about this in the log file.
+            log.warning("A user '{0!s}' exists as local admin and as user in "
+                        "your default realm!".format(loginname))
         if role == ROLE.ADMIN:
             g.audit_object.log({"user": "",
                                 "administrator": user_obj.login,
